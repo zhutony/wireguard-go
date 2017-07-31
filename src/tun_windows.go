@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,7 +12,7 @@ import (
 	"unsafe"
 )
 
-/* Relies on the OpenVPN TAP-Windows driver (NDIS 6)
+/* Relies on the OpenVPN TAP-Windows driver (NDIS 6 version)
  *
  * https://github.com/OpenVPN/tap-windows
  */
@@ -255,6 +254,7 @@ func getdeviceid(
 	)
 }
 
+// setStatus is used to bring up or bring down the interface
 func setStatus(fd windows.Handle, status bool) error {
 	var code [4]byte
 	if status {
@@ -344,7 +344,7 @@ func CreateTUN(name string) (TUNDevice, error) {
 		return nil, err
 	}
 
-	// type Handle uintptr
+	// create TUN device
 
 	handle, err := windows.CreateFile(
 		pathp,
@@ -356,23 +356,7 @@ func CreateTUN(name string) (TUNDevice, error) {
 		0,
 	)
 
-	// find the mac address of tap device, use this to find the name of interface
-
-	var bytesReturned uint32
-	mac := make([]byte, 6)
-	err = windows.DeviceIoControl(
-		handle,
-		TAP_IOCTL_GET_MAC,
-		&mac[0],
-		uint32(len(mac)),
-		&mac[0],
-		uint32(len(mac)),
-		&bytesReturned,
-		nil,
-	)
-
 	if err != nil {
-		windows.Close(handle)
 		return nil, err
 	}
 
@@ -389,9 +373,46 @@ func CreateTUN(name string) (TUNDevice, error) {
 	}
 
 	tun := &NativeTUN{
-		fd: handle,
-		ro: ro,
-		wo: wo,
+		fd:   handle,
+		name: name,
+		ro:   ro,
+		wo:   wo,
+	}
+
+	// find addresses of interface
+	// TODO: fix this hack, the question is how
+
+	inter, err := net.InterfaceByName(name)
+	if err != nil {
+		windows.Close(handle)
+		return nil, err
+	}
+
+	addrs, err := inter.Addrs()
+	if err != nil {
+		windows.Close(handle)
+		return nil, err
+	}
+
+	var ip net.IP
+	for _, addr := range addrs {
+		ip = func() net.IP {
+			switch v := addr.(type) {
+			case *net.IPNet:
+				return v.IP.To4()
+			case *net.IPAddr:
+				return v.IP.To4()
+			}
+			return nil
+		}()
+		if ip != nil {
+			break
+		}
+	}
+
+	if ip == nil {
+		windows.Close(handle)
+		return nil, errors.New("No IPv4 address found for interface")
 	}
 
 	// bring up device.
@@ -403,26 +424,11 @@ func CreateTUN(name string) (TUNDevice, error) {
 
 	// set tun mode
 
-	if err := setTUN(handle, "192.0.2.1/0"); err != nil {
+	mask := ip.String() + "/0"
+	if err := setTUN(handle, mask); err != nil {
 		windows.Close(handle)
 		return nil, err
 	}
 
-	// find the name of tap interface (should be the same specified)
-
-	ifces, err := net.Interfaces()
-	if err != nil {
-		windows.Close(handle)
-		return nil, err
-	}
-
-	for _, v := range ifces {
-		if bytes.Equal(v.HardwareAddr[:6], mac[:6]) {
-			tun.name = v.Name
-			return tun, nil
-		}
-	}
-
-	windows.Close(handle)
-	return nil, errIfceNameNotFound
+	return tun, nil
 }
