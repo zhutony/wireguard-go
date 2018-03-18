@@ -150,10 +150,18 @@ func main() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	// create wireguard device
+	// prepare networking
 
-	device := NewDevice(tun, logger)
+	networking, err := CreateNetworking()
+	if err != nil {
+		logger.Error.Println("Failed to setup networking:", err)
+		os.Exit(ExitSetupFailed)
+		return
+	}
 
+	// create WireGuard device / state
+
+	device := NewDevice(tun, networking, logger)
 	logger.Info.Println("Device started")
 
 	// start uapi listener

@@ -294,12 +294,17 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 				logDebug.Println("UAPI: Updating endpoint for peer:", peer.String())
 
 				err := func() error {
+					device.net.mutex.Lock()
+					defer device.net.mutex.Unlock()
+
 					peer.mutex.Lock()
 					defer peer.mutex.Unlock()
-					endpoint, err := CreateEndpoint(value)
+
+					endpoint, err := device.net.network.CreateEndpoint(value)
 					if err != nil {
 						return err
 					}
+
 					peer.endpoint = endpoint
 					peer.timer.handshakeDeadline.Reset(RekeyAttemptTime)
 					return nil

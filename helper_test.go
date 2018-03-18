@@ -73,7 +73,7 @@ func randDevice(t *testing.T) *Device {
 	}
 	tun, _ := CreateDummyTUN("dummy")
 	logger := NewLogger(LogLevelError, "")
-	device := NewDevice(tun, logger)
+	device := NewDevice(tun, nil, logger)
 	device.SetPrivateKey(sk)
 	return device
 }

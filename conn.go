@@ -7,7 +7,15 @@ import (
 	"net"
 )
 
+/* Describes the creation of binds and endpoints on the platform
+ */
+type Networking interface {
+	CreateBind(port uint16) (Bind, uint16, error)
+	CreateEndpoint(addr string) (Endpoint, error)
+}
+
 /* A Bind handles listening on a port for both IPv6 and IPv4 UDP traffic
+ * - Similar to a net.UDPConn interface.
  */
 type Bind interface {
 	SetMark(value uint32) error
@@ -33,7 +41,7 @@ type Endpoint interface {
 
 func parseEndpoint(s string) (*net.UDPAddr, error) {
 
-	// ensure that the host is an IP address
+	// ensure that the host is an IP address (e.g. not a domain name)
 
 	host, _, err := net.SplitHostPort(s)
 	if err != nil {
@@ -112,7 +120,7 @@ func (device *Device) BindUpdate() error {
 
 		var err error
 		netc := &device.net
-		netc.bind, netc.port, err = CreateBind(netc.port)
+		netc.bind, netc.port, err = device.net.network.CreateBind(netc.port)
 		if err != nil {
 			netc.bind = nil
 			netc.port = 0

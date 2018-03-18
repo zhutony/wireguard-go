@@ -22,10 +22,11 @@ type Device struct {
 	}
 
 	net struct {
-		mutex  sync.RWMutex
-		bind   Bind   // bind interface
-		port   uint16 // listening port
-		fwmark uint32 // mark value (0 = disabled)
+		mutex   sync.RWMutex
+		network Networking // networking intergace
+		bind    Bind       // bind interface
+		port    uint16     // listening port
+		fwmark  uint32     // mark value (0 = disabled)
 	}
 
 	noise struct {
@@ -248,7 +249,7 @@ func (device *Device) PutMessageBuffer(msg *[MaxMessageSize]byte) {
 	device.pool.messageBuffers.Put(msg)
 }
 
-func NewDevice(tun TUNDevice, logger *Logger) *Device {
+func NewDevice(tun TUNDevice, network Networking, logger *Logger) *Device {
 	device := new(Device)
 
 	device.isUp.Set(false)
@@ -290,6 +291,7 @@ func NewDevice(tun TUNDevice, logger *Logger) *Device {
 
 	device.net.port = 0
 	device.net.bind = nil
+	device.net.network = network
 
 	// start workers
 

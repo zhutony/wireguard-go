@@ -12,16 +12,25 @@ func TestDevice(t *testing.T) {
 
 	tun1, err := CreateDummyTUN("tun1")
 	if err != nil {
-		t.Error("failed to create tun:", err.Error())
+		t.Error("failed to create tun:", err)
 	}
 
 	tun2, err := CreateDummyTUN("tun2")
 	if err != nil {
-		t.Error("failed to create tun:", err.Error())
+		t.Error("failed to create tun:", err)
 	}
 
 	println(tun1)
 	println(tun2)
+
+	// prepare networking
+
+	network, err := CreateDummyNetworking()
+	if err != nil {
+		t.Error("failed to prepare networking:", err)
+	}
+
+	println(network)
 
 	// prepare endpoints
 
