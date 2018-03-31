@@ -3,17 +3,15 @@ package main
 import "errors"
 
 type DummyDatagram struct {
-	msg      []byte
+	contents []byte
 	endpoint Endpoint
-	world    bool // better type
 }
 
 type DummyBind struct {
-	in6    chan DummyDatagram
-	ou6    chan DummyDatagram
-	in4    chan DummyDatagram
-	ou4    chan DummyDatagram
-	closed bool
+	in6    chan DummyDatagram // inbound queue of ipv6 packages
+	in4    chan DummyDatagram // inbound queue of ipv4 packages
+	intr   DummyNetworking    // interface (used for outbound packages)
+	closed bool               // bind closed? (no more sending)
 }
 
 func (b *DummyBind) SetMark(v uint32) error {
@@ -25,8 +23,8 @@ func (b *DummyBind) ReceiveIPv6(buff []byte) (int, Endpoint, error) {
 	if !ok {
 		return 0, nil, errors.New("closed")
 	}
-	copy(buff, datagram.msg)
-	return len(datagram.msg), datagram.endpoint, nil
+	copy(buff, datagram.contents)
+	return len(datagram.contents), datagram.endpoint, nil
 }
 
 func (b *DummyBind) ReceiveIPv4(buff []byte) (int, Endpoint, error) {
@@ -34,8 +32,8 @@ func (b *DummyBind) ReceiveIPv4(buff []byte) (int, Endpoint, error) {
 	if !ok {
 		return 0, nil, errors.New("closed")
 	}
-	copy(buff, datagram.msg)
-	return len(datagram.msg), datagram.endpoint, nil
+	copy(buff, datagram.contents)
+	return len(datagram.contents), datagram.endpoint, nil
 }
 
 func (b *DummyBind) Close() error {

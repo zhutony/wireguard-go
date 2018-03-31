@@ -23,29 +23,22 @@ func TestDevice(t *testing.T) {
 	println(tun1)
 	println(tun2)
 
+	var network DummyNetwork
+
 	// prepare networking
 
-	network, err := CreateDummyNetworking()
+	net1, err := CreateDummyNetworking(&network)
 	if err != nil {
 		t.Error("failed to prepare networking:", err)
 	}
 
-	println(network)
-
-	// prepare endpoints
-
-	end1, err := CreateDummyEndpoint()
+	net2, err := CreateDummyNetworking(&network)
 	if err != nil {
-		t.Error("failed to create endpoint:", err.Error())
+		t.Error("failed to prepare networking:", err)
 	}
 
-	end2, err := CreateDummyEndpoint()
-	if err != nil {
-		t.Error("failed to create endpoint:", err.Error())
-	}
-
-	println(end1)
-	println(end2)
+	println(net1)
+	println(net2)
 
 	// create binds
 
