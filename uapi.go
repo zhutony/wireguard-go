@@ -34,66 +34,49 @@ func ipcGetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 		lines = append(lines, line)
 	}
 
-	func() {
+	// serialize device related values
 
-		// lock required resources
+	if !device.noise.privateKey.IsZero() {
+		send("private_key=" + device.GetPrivateKey().ToHex())
+	}
 
-		device.net.mutex.RLock()
-		defer device.net.mutex.RUnlock()
+	if device.net.port != 0 {
+		send(fmt.Sprintf("listen_port=%d", device.GetListenPort()))
+	}
 
-		device.noise.mutex.RLock()
-		defer device.noise.mutex.RUnlock()
+	if device.net.fwmark != 0 {
+		send(fmt.Sprintf("fwmark=%d", device.GetFWMark()))
+	}
 
-		device.routing.mutex.RLock()
-		defer device.routing.mutex.RUnlock()
+	// serialize each peer state
 
-		device.peers.mutex.Lock()
-		defer device.peers.mutex.Unlock()
+	for _, peer := range device.GetPeers() {
+		peer.mutex.RLock()
+		defer peer.mutex.RUnlock()
 
-		// serialize device related values
-
-		if !device.noise.privateKey.IsZero() {
-			send("private_key=" + device.noise.privateKey.ToHex())
+		send("public_key=" + peer.handshake.remoteStatic.ToHex())
+		send("preshared_key=" + peer.handshake.presharedKey.ToHex())
+		if peer.endpoint != nil {
+			send("endpoint=" + peer.endpoint.DstToString())
 		}
 
-		if device.net.port != 0 {
-			send(fmt.Sprintf("listen_port=%d", device.net.port))
+		nano := atomic.LoadInt64(&peer.stats.lastHandshakeNano)
+		secs := nano / time.Second.Nanoseconds()
+		nano %= time.Second.Nanoseconds()
+
+		send(fmt.Sprintf("last_handshake_time_sec=%d", secs))
+		send(fmt.Sprintf("last_handshake_time_nsec=%d", nano))
+		send(fmt.Sprintf("tx_bytes=%d", peer.stats.txBytes))
+		send(fmt.Sprintf("rx_bytes=%d", peer.stats.rxBytes))
+		send(fmt.Sprintf("persistent_keepalive_interval=%d",
+			atomic.LoadUint64(&peer.persistentKeepaliveInterval),
+		))
+
+		for _, ip := range device.GetAllowedIPs(peer) {
+			send("allowed_ip=" + ip.String())
 		}
 
-		if device.net.fwmark != 0 {
-			send(fmt.Sprintf("fwmark=%d", device.net.fwmark))
-		}
-
-		// serialize each peer state
-
-		for _, peer := range device.peers.keyMap {
-			peer.mutex.RLock()
-			defer peer.mutex.RUnlock()
-
-			send("public_key=" + peer.handshake.remoteStatic.ToHex())
-			send("preshared_key=" + peer.handshake.presharedKey.ToHex())
-			if peer.endpoint != nil {
-				send("endpoint=" + peer.endpoint.DstToString())
-			}
-
-			nano := atomic.LoadInt64(&peer.stats.lastHandshakeNano)
-			secs := nano / time.Second.Nanoseconds()
-			nano %= time.Second.Nanoseconds()
-
-			send(fmt.Sprintf("last_handshake_time_sec=%d", secs))
-			send(fmt.Sprintf("last_handshake_time_nsec=%d", nano))
-			send(fmt.Sprintf("tx_bytes=%d", peer.stats.txBytes))
-			send(fmt.Sprintf("rx_bytes=%d", peer.stats.rxBytes))
-			send(fmt.Sprintf("persistent_keepalive_interval=%d",
-				atomic.LoadUint64(&peer.persistentKeepaliveInterval),
-			))
-
-			for _, ip := range device.routing.table.AllowedIPs(peer) {
-				send("allowed_ip=" + ip.String())
-			}
-
-		}
-	}()
+	}
 
 	// send lines (does not require resource locks)
 
@@ -109,10 +92,16 @@ func ipcGetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 	return nil
 }
 
-func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
+func ipcSetOperation(
+	device *Device,
+	logger *Logger,
+	networking Networking,
+	socket *bufio.ReadWriter,
+) *IPCError {
+
 	scanner := bufio.NewScanner(socket)
-	logError := device.log.Error
-	logDebug := device.log.Debug
+	logError := logger.Error
+	logDebug := logger.Debug
 
 	var peer *Peer
 
@@ -161,12 +150,8 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 
 				// update port and rebind
 
-				logDebug.Println("UAPI: Updating listen port")
-
-				device.net.mutex.Lock()
-				device.net.port = uint16(port)
-				device.net.mutex.Unlock()
-
+				device.SetPort(uint16(port))
+				logDebug.Println("UAPI: Listen port updated")
 				if err := device.BindUpdate(); err != nil {
 					logError.Println("Failed to set listen_port:", err)
 					return &IPCError{Code: ipcErrorPortInUse}
@@ -191,7 +176,7 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 
 				logDebug.Println("UAPI: Updating fwmark")
 
-				if err := device.BindSetMark(uint32(fwmark)); err != nil {
+				if err := device.SetMark(uint32(fwmark)); err != nil {
 					logError.Println("Failed to update fwmark:", err)
 					return &IPCError{Code: ipcErrorPortInUse}
 				}
@@ -231,11 +216,7 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 
 				// ignore peer with public key of device
 
-				device.noise.mutex.RLock()
-				equals := device.noise.publicKey.Equals(publicKey)
-				device.noise.mutex.RUnlock()
-
-				if equals {
+				if device.GetPublicKey().Equals(publicKey) {
 					peer = &Peer{}
 					dummy = true
 				}
@@ -294,13 +275,10 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 				logDebug.Println("UAPI: Updating endpoint for peer:", peer.String())
 
 				err := func() error {
-					device.net.mutex.Lock()
-					defer device.net.mutex.Unlock()
-
 					peer.mutex.Lock()
 					defer peer.mutex.Unlock()
 
-					endpoint, err := device.net.network.CreateEndpoint(value)
+					endpoint, err := networking.CreateEndpoint(value)
 					if err != nil {
 						return err
 					}
@@ -353,13 +331,9 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 					return &IPCError{Code: ipcErrorInvalid}
 				}
 
-				if dummy {
-					continue
+				if !dummy {
+					device.ReplaceAllowedIPs(peer)
 				}
-
-				device.routing.mutex.Lock()
-				device.routing.table.RemovePeer(peer)
-				device.routing.mutex.Unlock()
 
 			case "allowed_ip":
 
@@ -371,14 +345,10 @@ func ipcSetOperation(device *Device, socket *bufio.ReadWriter) *IPCError {
 					return &IPCError{Code: ipcErrorInvalid}
 				}
 
-				if dummy {
-					continue
+				if !dummy {
+					ones, _ := network.Mask.Size()
+					device.AddAllowedIP(network.IP, uint(ones), peer)
 				}
-
-				ones, _ := network.Mask.Size()
-				device.routing.mutex.Lock()
-				device.routing.table.Insert(network.IP, uint(ones), peer)
-				device.routing.mutex.Unlock()
 
 			default:
 				logError.Println("Invalid UAPI key (peer configuration):", key)
@@ -416,7 +386,11 @@ func ipcHandle(device *Device, socket net.Conn) {
 	switch op {
 	case "set=1\n":
 		device.log.Debug.Println("Config, set operation")
-		status = ipcSetOperation(device, buffered)
+		status = ipcSetOperation(
+			device,
+			device.log,
+			device.net.network,
+			buffered)
 
 	case "get=1\n":
 		device.log.Debug.Println("Config, get operation")

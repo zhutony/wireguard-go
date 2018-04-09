@@ -92,14 +92,16 @@ func TestDevice(t *testing.T) {
 
 	// create devices
 
-	log1 := NewLogger(LogLevelDebug, "test-dev1")
-	log2 := NewLogger(LogLevelDebug, "test-dev2")
+	log1 := NewLogger(LogLevelError, "test-device-1 : ")
+	log2 := NewLogger(LogLevelError, "test-device-2 : ")
 
 	dev1 := NewDevice(tun1, net1, log1)
 	dev2 := NewDevice(tun2, net2, log2)
 
 	println(dev1)
 	println(dev2)
+
+	// create key material
 
 	// configure devices
 

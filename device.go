@@ -23,7 +23,7 @@ type Device struct {
 
 	net struct {
 		mutex   sync.RWMutex
-		network Networking // networking intergace
+		network Networking // networking interface
 		bind    Bind       // bind interface
 		port    uint16     // listening port
 		fwmark  uint32     // mark value (0 = disabled)

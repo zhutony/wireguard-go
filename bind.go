@@ -28,32 +28,6 @@ func unsafeCloseBind(device *Device) error {
 	return err
 }
 
-func (device *Device) BindSetMark(mark uint32) error {
-
-	device.net.mutex.Lock()
-	defer device.net.mutex.Unlock()
-
-	device.peers.mutex.Lock()
-	defer device.peers.mutex.Unlock()
-
-	// check if modified
-
-	if device.net.fwmark == mark {
-		return nil
-	}
-
-	// update fwmark on existing bind
-
-	device.net.fwmark = mark
-	if device.isUp.Get() && device.net.bind != nil {
-		if err := device.net.bind.SetMark(mark); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (device *Device) BindUpdate() error {
 
 	device.net.mutex.Lock()
