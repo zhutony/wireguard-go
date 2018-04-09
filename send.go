@@ -347,7 +347,7 @@ func (peer *Peer) RoutineSequentialSender() {
 
 			length := uint64(len(elem.packet))
 			err := peer.SendBuffer(elem.packet)
-			device.PutMessageBuffer(elem.buffer)
+			device.putMessageBuffer(elem.buffer)
 			if err != nil {
 				logDebug.Println("Failed to send authenticated packet to peer", peer.String())
 				continue

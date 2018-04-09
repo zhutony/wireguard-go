@@ -72,11 +72,11 @@ func (world *DummyNetwork) CreateDummyNetworking(
 	return intr, nil
 }
 
-func (_ DummyNetworking) CreateEndpoint(addr string) (Endpoint, error) {
+func (_ *DummyNetworking) CreateEndpoint(addr string) (Endpoint, error) {
 	return nil, errors.New("not used in unit tests")
 }
 
-func (world DummyNetwork) send(
+func (world *DummyNetwork) send(
 	contents []byte,
 	src net.UDPAddr,
 	to Endpoint,
@@ -121,25 +121,29 @@ func (world DummyNetwork) send(
 	return errors.New("Unable to parse IP")
 }
 
-func (intr DummyNetworking) recv6(
+func (intr *DummyNetworking) recv6(
 	datagram DummyDatagram,
 	dst net.UDPAddr,
 ) error {
+	intr.mutex.RLock()
 	bind := intr.binds[uint16(dst.Port)]
+	intr.mutex.RUnlock()
 	bind.in6 <- datagram
 	return nil
 }
 
-func (intr DummyNetworking) recv4(
+func (intr *DummyNetworking) recv4(
 	datagram DummyDatagram,
 	dst net.UDPAddr,
 ) error {
+	intr.mutex.RLock()
 	bind := intr.binds[uint16(dst.Port)]
+	intr.mutex.RUnlock()
 	bind.in4 <- datagram
 	return nil
 }
 
-func (intr DummyNetworking) send(
+func (intr *DummyNetworking) send(
 	msg []byte, // packet contents
 	port uint16, // source port
 	to Endpoint, // remote destination
@@ -150,7 +154,7 @@ func (intr DummyNetworking) send(
 	return intr.world.send(msg, addr, to)
 }
 
-func (intr DummyNetworking) CreateBind(port uint16) (Bind, uint16, error) {
+func (intr *DummyNetworking) CreateBind(port uint16) (Bind, uint16, error) {
 
 	intr.mutex.Lock()
 	defer intr.mutex.Unlock()

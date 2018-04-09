@@ -2,57 +2,8 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"testing"
 )
-
-/* Helpers for writing unit tests
- */
-
-type DummyTUN struct {
-	name    string
-	mtu     int
-	packets chan []byte
-	events  chan TUNEvent
-}
-
-func (tun *DummyTUN) File() *os.File {
-	return nil
-}
-
-func (tun *DummyTUN) Name() string {
-	return tun.name
-}
-
-func (tun *DummyTUN) MTU() (int, error) {
-	return tun.mtu, nil
-}
-
-func (tun *DummyTUN) Write(d []byte, offset int) (int, error) {
-	tun.packets <- d[offset:]
-	return len(d), nil
-}
-
-func (tun *DummyTUN) Close() error {
-	return nil
-}
-
-func (tun *DummyTUN) Events() chan TUNEvent {
-	return tun.events
-}
-
-func (tun *DummyTUN) Read(d []byte, offset int) (int, error) {
-	t := <-tun.packets
-	copy(d[offset:], t)
-	return len(t), nil
-}
-
-func CreateDummyTUN(name string) (TUNDevice, error) {
-	var dummy DummyTUN
-	dummy.mtu = 0
-	dummy.packets = make(chan []byte, 100)
-	return &dummy, nil
-}
 
 func assertNil(t *testing.T, err error) {
 	if err != nil {

@@ -241,11 +241,11 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
 	return nil
 }
 
-func (device *Device) GetMessageBuffer() *[MaxMessageSize]byte {
+func (device *Device) getMessageBuffer() *[MaxMessageSize]byte {
 	return device.pool.messageBuffers.Get().(*[MaxMessageSize]byte)
 }
 
-func (device *Device) PutMessageBuffer(msg *[MaxMessageSize]byte) {
+func (device *Device) putMessageBuffer(msg *[MaxMessageSize]byte) {
 	device.pool.messageBuffers.Put(msg)
 }
 

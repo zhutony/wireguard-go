@@ -86,7 +86,7 @@ func (device *Device) addToHandshakeQueue(
 		default:
 			select {
 			case elem := <-queue:
-				device.PutMessageBuffer(elem.buffer)
+				device.putMessageBuffer(elem.buffer)
 			default:
 			}
 		}
@@ -105,7 +105,7 @@ func (device *Device) RoutineReceiveIncoming(IP int, bind Bind) {
 
 	// receive datagrams until conn is closed
 
-	buffer := device.GetMessageBuffer()
+	buffer := device.getMessageBuffer()
 
 	var (
 		err      error
@@ -187,7 +187,7 @@ func (device *Device) RoutineReceiveIncoming(IP int, bind Bind) {
 			if peer.isRunning.Get() {
 				device.addToDecryptionQueue(device.queue.decryption, elem)
 				device.addToInboundQueue(peer.queue.inbound, elem)
-				buffer = device.GetMessageBuffer()
+				buffer = device.getMessageBuffer()
 			}
 
 			continue
@@ -214,7 +214,7 @@ func (device *Device) RoutineReceiveIncoming(IP int, bind Bind) {
 					endpoint: endpoint,
 				},
 			)
-			buffer = device.GetMessageBuffer()
+			buffer = device.getMessageBuffer()
 		}
 	}
 }
@@ -635,7 +635,7 @@ func (peer *Peer) RoutineSequentialReceiver() {
 			_, err := device.tun.device.Write(
 				elem.buffer[:offset+len(elem.packet)],
 				offset)
-			device.PutMessageBuffer(elem.buffer)
+			device.putMessageBuffer(elem.buffer)
 			if err != nil {
 				logError.Println("Failed to write packet to TUN device:", err)
 			}
