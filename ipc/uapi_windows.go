@@ -50,7 +50,7 @@ func UAPIListen(name string) (net.Listener, error) {
 	config := winio.PipeConfig{
 		SecurityDescriptor: "", //TODO: we want this to be a very locked down pipe.
 	}
-	listener, err := winio.ListenPipe("\\\\.\\pipe\\wireguard\\"+name, &config) //TODO: choose sane name.
+	listener, err := winio.ListenPipe("\\\\.\\pipe\\wireguard_"+name, &config)
 	if err != nil {
 		return nil, err
 	}
