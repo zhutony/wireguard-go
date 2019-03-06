@@ -46,9 +46,20 @@ func (l *UAPIListener) Addr() net.Addr {
 	return l.listener.Addr()
 }
 
+func GetSystemSecurityDescriptor() string {
+	//
+	// SDDL encoded.
+	//
+	// (system = SECURITY_NT_AUTHORITY | SECURITY_LOCAL_SYSTEM_RID)
+	// owner: system
+	// grant: GENERIC_ALL to system
+	//
+	return "O:SYD:(A;;GA;;;SY)"
+}
+
 func UAPIListen(name string) (net.Listener, error) {
 	config := winio.PipeConfig{
-		SecurityDescriptor: "", //TODO: we want this to be a very locked down pipe.
+		SecurityDescriptor: GetSystemSecurityDescriptor(),
 	}
 	listener, err := winio.ListenPipe("\\\\.\\pipe\\wireguard_"+name, &config)
 	if err != nil {
