@@ -36,6 +36,15 @@ This runs on macOS using the utun driver. It does not yet support sticky sockets
 
 This runs on Windows, but you should instead use it from the more [fully featured Windows app](https://git.zx2c4.com/wireguard-windows/about/), which uses this as a module.
 
+This branch was altered not to delete the TUN adapter after use. Instead, the code just disables it and reenables it next time. The rationale behind this change is:
+
+- A new network profile is created each time WireGuard creates a TUN adapter. Before Windows 10/Server 2016 the network profiles cannot be reused. This leads to:
+  - Firewall zone selection is lost across tunnel recycling. 
+  - A large number of stale network profiles causes issues in Task Scheduler [1](https://answers.microsoft.com/en-us/windows/forum/windows_10-start/task-scheduler-crashed/5acab7c5-eb79-48c8-876d-ade321565953).
+- Manual adapter configuration persists across tunnel recycling. Like adapter DNS suffix.
+
+This branch is experimental. Use at own risk.
+
 ### FreeBSD
 
 This will run on FreeBSD. It does not yet support sticky sockets. Fwmark is mapped to `SO_USER_COOKIE`.

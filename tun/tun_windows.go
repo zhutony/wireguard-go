@@ -70,16 +70,27 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID, mtu 
 
 	// Does an interface with this name already exist?
 	wt, err = WintunPool.GetInterface(ifname)
-	if err == nil {
-		// If so, we delete it, in case it has weird residual configuration.
-		_, err = wt.DeleteInterface()
+	if err == windows.ERROR_OBJECT_NOT_FOUND {
+		// Interface does not exist. Create one.
+		wt, _, err = WintunPool.CreateInterface("WireGuard Tunnel Adapter", requestedGUID)
 		if err != nil {
-			return nil, fmt.Errorf("Error deleting already existing interface: %v", err)
+			return nil, fmt.Errorf("Error creating interface: %v", err)
 		}
-	}
-	wt, _, err = WintunPool.CreateInterface(ifname, requestedGUID)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating interface: %v", err)
+
+		err = wt.SetName(ifname)
+		if err != nil {
+			wt.DeleteInterface()
+			return nil, fmt.Errorf("Error renaming interface: %v", err)
+		}
+	} else if err == windows.ERROR_ALREADY_EXISTS {
+		return nil, fmt.Errorf("Foreign network interface with the same name exists")
+	} else if err != nil {
+		return nil, fmt.Errorf("Error finding interface: %v", err)
+	} else {
+		_, err = wt.EnableInterface(true)
+		if err != nil {
+			return nil, fmt.Errorf("Error enabling interface: %v", err)
+		}
 	}
 
 	forcedMTU := 1420
@@ -130,12 +141,9 @@ func (tun *NativeTun) Close() error {
 		windows.CloseHandle(tun.handle)
 	}
 	tun.rings.Close()
-	var err error
-	if tun.wt != nil {
-		_, err = tun.wt.DeleteInterface()
-	}
 	close(tun.events)
-	return err
+	tun.wt.EnableInterface(false)
+	return nil
 }
 
 func (tun *NativeTun) MTU() (int, error) {
