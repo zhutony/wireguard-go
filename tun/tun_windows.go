@@ -38,31 +38,37 @@ type exchgBufWrite struct {
 }
 
 type NativeTun struct {
-	wt           *wintun.Wintun
-	tunFileRead  *os.File
-	tunFileWrite *os.File
-	tunLock      sync.Mutex
-	close        bool
-	rdBuff       *exchgBufRead
-	wrBuff       *exchgBufWrite
-	events       chan TUNEvent
-	errors       chan error
-	forcedMtu    int
+	wt            *wintun.Wintun
+	tunFileRead   *os.File
+	tunFileWrite  *os.File
+	tunLock       sync.Mutex
+	close         bool
+	rdBuff        *exchgBufRead
+	wrBuff        *exchgBufWrite
+	events        chan TUNEvent
+	errors        chan error
+	forcedMtu     int
+	deleteOnClose bool
 }
 
 func packetAlign(size uint32) uint32 {
 	return (size + (packetExchangeAlignment - 1)) &^ (packetExchangeAlignment - 1)
 }
 
+func CreateTUN(ifname string, deleteOnClose bool) (TUNDevice, error) {
+	return CreateTUNEx(ifname, true)
+}
+
 //
-// CreateTUN creates a Wintun adapter with the given name. Should a Wintun
-// adapter with the same name exist, it is reused.
+// CreateTUNEx creates a Wintun adapter with the given name. Should a Wintun
+// adapter with the same name exist, it is reused. The function name is a
+// Windows joke...
 //
-func CreateTUN(ifname string) (TUNDevice, error) {
+func CreateTUNEx(ifname string, deleteOnClose bool) (TUNDevice, error) {
 	// Does an interface with this name already exist?
 	wt, err := wintun.GetInterface(ifname, 0)
 	if wt == nil {
-		// Interface does not exist or an error occured. Create one.
+		// Interface does not exist or an error occurred. Create one.
 		wt, _, err = wintun.CreateInterface("WireGuard Tunnel Adapter", 0)
 		if err != nil {
 			return nil, errors.New("Creating Wintun adapter failed: " + err.Error())
@@ -73,12 +79,12 @@ func CreateTUN(ifname string) (TUNDevice, error) {
 		// proces die without deleting this interface first, the interface would remain
 		// orphaned.
 		return nil, err
-	}
-
-	err = wt.SetInterfaceName(ifname)
-	if err != nil {
-		wt.DeleteInterface(0)
-		return nil, err
+	} else {
+		err = wt.SetInterfaceName(ifname)
+		if err != nil {
+			wt.DeleteInterface(0)
+			return nil, err
+		}
 	}
 
 	err = wt.FlushInterface()
@@ -88,12 +94,13 @@ func CreateTUN(ifname string) (TUNDevice, error) {
 	}
 
 	return &NativeTun{
-		wt:        wt,
-		rdBuff:    &exchgBufRead{},
-		wrBuff:    &exchgBufWrite{},
-		events:    make(chan TUNEvent, 10),
-		errors:    make(chan error, 1),
-		forcedMtu: 1500,
+		wt:            wt,
+		rdBuff:        &exchgBufRead{},
+		wrBuff:        &exchgBufWrite{},
+		events:        make(chan TUNEvent, 10),
+		errors:        make(chan error, 1),
+		forcedMtu:     1500,
+		deleteOnClose: deleteOnClose,
 	}, nil
 }
 
@@ -208,9 +215,11 @@ func (tun *NativeTun) Close() error {
 		close(tun.events)
 	}
 
-	_, _, err2 := tun.wt.DeleteInterface(0)
-	if err1 == nil {
-		err1 = err2
+	if tun.deleteOnClose {
+		_, _, err2 := tun.wt.DeleteInterface(0)
+		if err1 == nil {
+			err1 = err2
+		}
 	}
 
 	return err1
