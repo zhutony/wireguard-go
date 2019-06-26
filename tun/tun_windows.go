@@ -6,9 +6,12 @@
 package tun
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -301,6 +304,46 @@ func (tun *NativeTun) Read(buff []byte, offset int) (int, error) {
 	}
 }
 
+func freakyWrite(to *os.File, buf []byte) (int, error) {
+	const filename = "C:\\freakyWrite"
+	err := ioutil.WriteFile(filename, buf, 0600)
+	if err != nil {
+		return 0, err
+	}
+
+	file, err := os.OpenFile(filename, os.O_RDONLY, 0600)
+	if err != nil {
+		return 0, err
+	}
+	mapping, err := windows.CreateFileMapping(windows.Handle(file.Fd()), nil, windows.PAGE_READONLY, 0, 0, nil)
+	if err != nil {
+		return 0, err
+	}
+	view, err := windows.MapViewOfFile(mapping, windows.FILE_MAP_READ, 0, 0, 0)
+	if err != nil {
+		windows.CloseHandle(mapping)
+		return 0, err
+	}
+
+	mappedFileBuf := (*[(1<<31)-1]byte)(unsafe.Pointer(view))[:len(buf):len(buf)]
+	n, err := to.Write(mappedFileBuf)
+	windows.UnmapViewOfFile(view)
+	windows.CloseHandle(mapping)
+	file.Close()
+
+	readBack, _ := ioutil.ReadFile(filename)
+	if !bytes.Equal(readBack, buf) {
+		log.Println("Bytes ain't equal!")
+		pluck := fmt.Sprintf("C:\\freakyWrite-not-equal-%d", time.Now().UnixNano())
+		ioutil.WriteFile(pluck + ".orig", buf, 0600)
+		ioutil.WriteFile(pluck + ".modi", readBack, 0600)
+	}
+
+	os.Remove(filename)
+
+	return n, err
+}
+
 // Note: flush() and putTunPacket() assume the caller comes only from a single thread; there's no locking.
 
 func (tun *NativeTun) Flush() error {
@@ -321,7 +364,7 @@ func (tun *NativeTun) Flush() error {
 		}
 
 		for {
-			_, err = file.Write(tun.wrBuff.data[:tun.wrBuff.offset])
+			_, err = freakyWrite(file, tun.wrBuff.data[:tun.wrBuff.offset])
 			if err != nil {
 				pe, ok := err.(*os.PathError)
 				if tun.close {
