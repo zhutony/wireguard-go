@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/ipc"
+	"golang.zx2c4.com/wireguard/wgcfg"
 )
 
 type IPCError struct {
@@ -52,7 +53,7 @@ func (device *Device) IpcGetOperation(socket *bufio.Writer) *IPCError {
 		// serialize device related values
 
 		if !device.staticIdentity.privateKey.IsZero() {
-			send("private_key=" + device.staticIdentity.privateKey.ToHex())
+			send("private_key=" + device.staticIdentity.privateKey.HexString())
 		}
 
 		if device.net.port != 0 {
@@ -69,8 +70,8 @@ func (device *Device) IpcGetOperation(socket *bufio.Writer) *IPCError {
 			peer.RLock()
 			defer peer.RUnlock()
 
-			send("public_key=" + peer.handshake.remoteStatic.ToHex())
-			send("preshared_key=" + peer.handshake.presharedKey.ToHex())
+			send("public_key=" + peer.handshake.remoteStatic.HexString())
+			send("preshared_key=" + peer.handshake.presharedKey.HexString())
 			send("protocol_version=1")
 			if peer.endpoint != nil {
 				send("endpoint=" + peer.endpoint.DstToString())
@@ -136,8 +137,7 @@ func (device *Device) IpcSetOperation(socket *bufio.Reader) *IPCError {
 
 			switch key {
 			case "private_key":
-				var sk NoisePrivateKey
-				err := sk.FromHex(value)
+				sk, err := wgcfg.ParsePrivateHexKey(value)
 				if err != nil {
 					logError.Println("Failed to set private_key:", err)
 					return &IPCError{ipc.IpcErrorInvalid}
@@ -218,8 +218,7 @@ func (device *Device) IpcSetOperation(socket *bufio.Reader) *IPCError {
 			switch key {
 
 			case "public_key":
-				var publicKey NoisePublicKey
-				err := publicKey.FromHex(value)
+				publicKey, err := wgcfg.ParseHexKey(value)
 				if err != nil {
 					logError.Println("Failed to get peer by public key:", err)
 					return &IPCError{ipc.IpcErrorInvalid}
@@ -228,7 +227,7 @@ func (device *Device) IpcSetOperation(socket *bufio.Reader) *IPCError {
 				// ignore peer with public key of device
 
 				device.staticIdentity.RLock()
-				dummy = device.staticIdentity.publicKey.Equals(publicKey)
+				dummy = device.staticIdentity.publicKey.Equal(publicKey)
 				device.staticIdentity.RUnlock()
 
 				if dummy {
@@ -266,9 +265,10 @@ func (device *Device) IpcSetOperation(socket *bufio.Reader) *IPCError {
 				// update PSK
 
 				logDebug.Println(peer, "- UAPI: Updating preshared key")
+				var err error
 
 				peer.handshake.mutex.Lock()
-				err := peer.handshake.presharedKey.FromHex(value)
+				peer.handshake.presharedKey, err = wgcfg.ParseSymmetricHexKey(value)
 				peer.handshake.mutex.Unlock()
 
 				if err != nil {

@@ -12,6 +12,8 @@ package device
 import (
 	"bytes"
 	"testing"
+
+	"golang.zx2c4.com/wireguard/wgcfg"
 )
 
 func TestDevice(t *testing.T) {
@@ -44,7 +46,8 @@ func TestDevice(t *testing.T) {
 }
 
 func randDevice(t *testing.T) *Device {
-	sk, err := newPrivateKey()
+	t.Helper()
+	sk, err := wgcfg.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,12 +59,14 @@ func randDevice(t *testing.T) *Device {
 }
 
 func assertNil(t *testing.T, err error) {
+	t.Helper()
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func assertEqual(t *testing.T, a, b []byte) {
+	t.Helper()
 	if !bytes.Equal(a, b) {
 		t.Fatal(a, "!=", b)
 	}
