@@ -20,16 +20,16 @@ type Config struct {
 }
 
 type Interface struct {
-	PrivateKey Key
+	PrivateKey PrivateKey
 	Addresses  []CIDR
 	ListenPort uint16
-	Mtu        uint16
-	Dns        []net.IP
+	MTU        uint16
+	DNS        []net.IP // TODO(crawshaw): use wgcfg.IP type
 }
 
 type Peer struct {
 	PublicKey           Key
-	PresharedKey        Key
+	PresharedKey        SymmetricKey
 	AllowedIPs          []CIDR
 	Endpoint            Endpoint
 	PersistentKeepalive uint16

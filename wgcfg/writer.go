@@ -30,16 +30,16 @@ func (conf *Config) ToWgQuick() string {
 		fmt.Fprintf(output, "Address = %s\n", strings.Join(addrStrings[:], ", "))
 	}
 
-	if len(conf.Interface.Dns) > 0 {
-		addrStrings := make([]string, len(conf.Interface.Dns))
-		for i, address := range conf.Interface.Dns {
+	if len(conf.Interface.DNS) > 0 {
+		addrStrings := make([]string, len(conf.Interface.DNS))
+		for i, address := range conf.Interface.DNS {
 			addrStrings[i] = address.String()
 		}
 		fmt.Fprintf(output, "DNS = %s\n", strings.Join(addrStrings[:], ", "))
 	}
 
-	if conf.Interface.Mtu > 0 {
-		fmt.Fprintf(output, "MTU = %d\n", conf.Interface.Mtu)
+	if conf.Interface.MTU > 0 {
+		fmt.Fprintf(output, "MTU = %d\n", conf.Interface.MTU)
 	}
 
 	for _, peer := range conf.Peers {

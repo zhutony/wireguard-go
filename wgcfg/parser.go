@@ -178,7 +178,7 @@ func FromWgQuick(s string, name string) (*Config, error) {
 		if parserState == inInterfaceSection {
 			switch key {
 			case "privatekey":
-				k, err := ParseKey(val)
+				k, err := ParsePrivateKey(val)
 				if err != nil {
 					return nil, err
 				}
@@ -195,7 +195,7 @@ func FromWgQuick(s string, name string) (*Config, error) {
 				if err != nil {
 					return nil, err
 				}
-				conf.Interface.Mtu = m
+				conf.Interface.MTU = m
 			case "address":
 				addresses, err := splitList(val)
 				if err != nil {
@@ -218,7 +218,7 @@ func FromWgQuick(s string, name string) (*Config, error) {
 					if a == nil {
 						return nil, &ParseError{"Invalid IP address", address}
 					}
-					conf.Interface.Dns = append(conf.Interface.Dns, a)
+					conf.Interface.DNS = append(conf.Interface.DNS, a)
 				}
 			default:
 				return nil, &ParseError{"Invalid key for [Interface] section", key}
@@ -232,7 +232,7 @@ func FromWgQuick(s string, name string) (*Config, error) {
 				}
 				peer.PublicKey = k
 			case "presharedkey":
-				k, err := ParseKey(val)
+				k, err := ParseSymmetricKey(val)
 				if err != nil {
 					return nil, err
 				}
@@ -290,8 +290,8 @@ func Broken_FromUAPI(s string, existingConfig *Config) (*Config, error) {
 		Name: existingConfig.Name,
 		Interface: Interface{
 			Addresses: existingConfig.Interface.Addresses,
-			Dns:       existingConfig.Interface.Dns,
-			Mtu:       existingConfig.Interface.Mtu,
+			DNS:       existingConfig.Interface.DNS,
+			MTU:       existingConfig.Interface.MTU,
 		},
 	}
 	var peer *Peer
@@ -326,7 +326,7 @@ func Broken_FromUAPI(s string, existingConfig *Config) (*Config, error) {
 				if err != nil {
 					return nil, err
 				}
-				conf.Interface.PrivateKey = *k
+				conf.Interface.PrivateKey = PrivateKey(*k)
 			case "listen_port":
 				p, err := parsePort(val)
 				if err != nil {
@@ -352,7 +352,7 @@ func Broken_FromUAPI(s string, existingConfig *Config) (*Config, error) {
 				if err != nil {
 					return nil, err
 				}
-				peer.PresharedKey = *k
+				peer.PresharedKey = SymmetricKey(*k)
 			case "protocol_version":
 				if val != "1" {
 					return nil, &ParseError{"Protocol version must be 1", val}
