@@ -38,9 +38,12 @@ type Endpoint interface {
 	SrcToString() string // returns the local source address (ip:port)
 	DstToString() string // returns the destination address (ip:port)
 	DstToBytes() []byte  // used for mac2 cookie calculations
+	RemoteAddr() *net.UDPAddr
 	DstIP() net.IP
 	SrcIP() net.IP
 }
+
+// TODO(crawshaw): replace DstToString/DstIP with RemoteAddr() *net.UDPAddr
 
 func parseEndpoint(s string) (*net.UDPAddr, error) {
 	// ensure that the host is an IP address

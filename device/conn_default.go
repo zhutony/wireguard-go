@@ -56,6 +56,8 @@ func (e *NativeEndpoint) DstToBytes() []byte {
 	return out
 }
 
+func (end *NativeEndpoint) RemoteAddr() *net.UDPAddr { return (*net.UDPAddr)(end) }
+
 func (e *NativeEndpoint) DstToString() string {
 	return (*net.UDPAddr)(e).String()
 }

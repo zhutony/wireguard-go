@@ -313,6 +313,10 @@ func (end *NativeEndpoint) SrcToString() string {
 }
 
 func (end *NativeEndpoint) DstToString() string {
+	return end.RemoteAddr().String()
+}
+
+func (end *NativeEndpoint) RemoteAddr() *net.UDPAddr {
 	var udpAddr net.UDPAddr
 	udpAddr.IP = end.DstIP()
 	if !end.isV6 {
@@ -320,7 +324,7 @@ func (end *NativeEndpoint) DstToString() string {
 	} else {
 		udpAddr.Port = end.dst6().Port
 	}
-	return udpAddr.String()
+	return &udpAddr
 }
 
 func (end *NativeEndpoint) ClearDst() {
