@@ -28,6 +28,15 @@ func TestConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pk3, err := wgcfg.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip3, err := wgcfg.ParseCIDR("10.0.0.3/32")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	cfg1 := &wgcfg.Config{
 		Interface: wgcfg.Interface{
 			PrivateKey: pk1,
@@ -54,19 +63,62 @@ func TestConfig(t *testing.T) {
 	defer device1.Close()
 	defer device2.Close()
 
-	if err := device1.Reconfig(cfg1); err != nil {
-		t.Fatal(err)
-	}
-	if err := device2.Reconfig(cfg2); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("device1 config", func(t *testing.T) {
+		if err := device1.Reconfig(cfg1); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := device1.Config().ToWgQuick(), cfg1.ToWgQuick(); got != want {
+			t.Errorf("reconfig:\n%s\n----- want:\n\n%s", got, want)
+		}
+	})
 
-	if got, want := device1.Config().ToWgQuick(), cfg1.ToWgQuick(); got != want {
-		t.Errorf("device1 config:\n%s\n----- want:\n\n%s", got, want)
-	}
-	if got, want := device2.Config().ToWgQuick(), cfg2.ToWgQuick(); got != want {
-		t.Errorf("device2 config:\n%s\n----- want:\n\n%s", got, want)
-	}
+	t.Run("device2 config", func(t *testing.T) {
+		if err := device2.Reconfig(cfg2); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := device2.Config().ToWgQuick(), cfg2.ToWgQuick(); got != want {
+			t.Errorf("reconfig:\n%s\n----- want:\n\n%s", got, want)
+		}
+	})
+
+	t.Run("device1 modify peer", func(t *testing.T) {
+		cfg1.Peers[0].Endpoint = wgcfg.Endpoint{
+			Host: "1.2.3.4",
+			Port: 12345,
+		}
+		if err := device1.Reconfig(cfg1); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := device1.Config().ToWgQuick(), cfg1.ToWgQuick(); got != want {
+			t.Errorf("reconfig:\n%s\n----- want:\n\n%s", got, want)
+		}
+	})
+
+	t.Run("device1 add new peer", func(t *testing.T) {
+		cfg1.Peers = append(cfg1.Peers, wgcfg.Peer{
+			PublicKey:  pk3.Public(),
+			AllowedIPs: []wgcfg.CIDR{*ip3},
+		})
+
+		device1.peers.RLock()
+		originalPeer0 := device1.peers.keyMap[pk2.Public()]
+		device1.peers.RUnlock()
+
+		if err := device1.Reconfig(cfg1); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := device1.Config().ToWgQuick(), cfg1.ToWgQuick(); got != want {
+			t.Errorf("reconfig:\n%s\n----- want:\n\n%s", got, want)
+		}
+
+		device1.peers.RLock()
+		newPeer0 := device1.peers.keyMap[pk2.Public()]
+		device1.peers.RUnlock()
+
+		if originalPeer0 != newPeer0 {
+			t.Error("reconfig modified old peer")
+		}
+	})
 }
 
 // TODO: replace with a loopback tunnel
