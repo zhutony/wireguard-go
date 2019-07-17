@@ -15,8 +15,14 @@ type IP struct {
 
 func (ip IP) String() string { return net.IP(ip.Addr[:]).String() }
 
-func (ip *IP) IP() net.IP { return net.IP(ip.Addr[:]) }
-func (ip *IP) Is6() bool  { return !ip.Is4() }
+func (ip *IP) IP() net.IP {
+	var netip net.IP
+	if ip.Is4() {
+		return append(netip, ip.Addr[12:]...)
+	}
+	return append(netip, ip.Addr[:]...)
+}
+func (ip *IP) Is6() bool { return !ip.Is4() }
 func (ip *IP) Is4() bool {
 	return ip.Addr[0] == 0 && ip.Addr[1] == 0 &&
 		ip.Addr[2] == 0 && ip.Addr[3] == 0 &&
