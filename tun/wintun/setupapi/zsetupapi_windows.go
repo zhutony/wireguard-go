@@ -57,6 +57,7 @@ var (
 	procSetupDiOpenDevRegKey               = modsetupapi.NewProc("SetupDiOpenDevRegKey")
 	procSetupDiGetDeviceRegistryPropertyW  = modsetupapi.NewProc("SetupDiGetDeviceRegistryPropertyW")
 	procSetupDiSetDeviceRegistryPropertyW  = modsetupapi.NewProc("SetupDiSetDeviceRegistryPropertyW")
+	procSetupDiSetDevicePropertyW          = modsetupapi.NewProc("SetupDiSetDevicePropertyW")
 	procSetupDiGetDeviceInstallParamsW     = modsetupapi.NewProc("SetupDiGetDeviceInstallParamsW")
 	procSetupDiGetDeviceInstanceIdW        = modsetupapi.NewProc("SetupDiGetDeviceInstanceIdW")
 	procSetupDiGetClassInstallParamsW      = modsetupapi.NewProc("SetupDiGetClassInstallParamsW")
@@ -267,6 +268,18 @@ func setupDiGetDeviceRegistryProperty(deviceInfoSet DevInfo, deviceInfoData *Dev
 
 func setupDiSetDeviceRegistryProperty(deviceInfoSet DevInfo, deviceInfoData *DevInfoData, property SPDRP, propertyBuffer *byte, propertyBufferSize uint32) (err error) {
 	r1, _, e1 := syscall.Syscall6(procSetupDiSetDeviceRegistryPropertyW.Addr(), 5, uintptr(deviceInfoSet), uintptr(unsafe.Pointer(deviceInfoData)), uintptr(property), uintptr(unsafe.Pointer(propertyBuffer)), uintptr(propertyBufferSize), 0)
+	if r1 == 0 {
+		if e1 != 0 {
+			err = errnoErr(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func setupDiSetDeviceProperty(deviceInfoSet DevInfo, deviceInfoData *DevInfoData, propertyKey *DevPropKey, propertyType DevPropType, propertyBuffer *byte, propertyBufferSize uint32, flags uint32) (err error) {
+	r1, _, e1 := syscall.Syscall9(procSetupDiSetDevicePropertyW.Addr(), 7, uintptr(deviceInfoSet), uintptr(unsafe.Pointer(deviceInfoData)), uintptr(unsafe.Pointer(propertyKey)), uintptr(propertyType), uintptr(unsafe.Pointer(propertyBuffer)), uintptr(propertyBufferSize), uintptr(flags), 0, 0)
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)

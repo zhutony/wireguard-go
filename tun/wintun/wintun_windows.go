@@ -30,6 +30,14 @@ type Wintun struct {
 
 var deviceClassNetGUID = windows.GUID{Data1: 0x4d36e972, Data2: 0xe325, Data3: 0x11ce, Data4: [8]byte{0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}}
 var deviceInterfaceNetGUID = windows.GUID{Data1: 0xcac88484, Data2: 0x7515, Data3: 0x4c03, Data4: [8]byte{0x82, 0xe6, 0x71, 0xa8, 0x7a, 0xba, 0xc3, 0x61}}
+var netSetupPKeyDriverFriendlyName = setupapi.DevPropKey{ // Reverse engineered from NetSetupEngine.dll
+	FmtID: windows.GUID{Data1: 0xa111f1f0, Data2: 0x5923, Data3: 0x47c0, Data4: [8]byte{0x9a, 0x68, 0xd0, 0xba, 0xfb, 0x57, 0x79, 0x01}},
+	PID: 6,
+}
+var netSetupPKeyDriverDescription = setupapi.DevPropKey{ // Reverse engineered from NetSetupEngine.dll
+	FmtID: windows.GUID{Data1: 0xa111f1f0, Data2: 0x5923, Data3: 0x47c0, Data4: [8]byte{0x9a, 0x68, 0xd0, 0xba, 0xfb, 0x57, 0x79, 0x01}},
+	PID: 8,
+}
 
 const (
 	deviceTypeName         = "WireGuard Tunnel"
@@ -316,6 +324,18 @@ func CreateInterface(description string, requestedGUID *windows.GUID) (wintun *W
 	}
 	rebootRequired = checkReboot(devInfoList, deviceData)
 
+	err = devInfoList.SetDeviceRegistryPropertyString(deviceData, setupapi.SPDRP_DEVICEDESC, deviceTypeName)
+	if err != nil {
+		err = fmt.Errorf("SetupDiSetDeviceRegistryProperty(SPDRP_DEVICEDESC) failed: %v", err)
+		return
+	}
+
+	err = devInfoList.SetDevicePropertyString(deviceData, &netSetupPKeyDriverFriendlyName, deviceTypeName)
+	if err != nil {
+		err = fmt.Errorf("SetDevicePropertyString(NETSETUPPKEY_Driver_FriendlyName) failed: %v", err)
+		return
+	}
+
 	// DIF_INSTALLDEVICE returns almost immediately, while the device installation
 	// continues in the background. It might take a while, before all registry
 	// keys and values are populated.
@@ -339,24 +359,6 @@ func CreateInterface(description string, requestedGUID *windows.GUID) (wintun *W
 	wintun, err = makeWintun(devInfoList, deviceData)
 	if err != nil {
 		err = fmt.Errorf("makeWintun failed: %v", err)
-		return
-	}
-
-	// Name ourselves.
-	deviceRegKey, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.deviceRegKeyName(), registry.SET_VALUE)
-	if err != nil {
-		err = fmt.Errorf("Device-level registry key open failed: %v", err)
-		return
-	}
-	defer deviceRegKey.Close()
-	err = deviceRegKey.SetStringValue("DeviceDesc", deviceTypeName)
-	if err != nil {
-		err = fmt.Errorf("SetStringValue(DeviceDesc) failed: %v", err)
-		return
-	}
-	err = deviceRegKey.SetStringValue("FriendlyName", deviceTypeName)
-	if err != nil {
-		err = fmt.Errorf("SetStringValue(FriendlyName) failed: %v", err)
 		return
 	}
 
@@ -563,34 +565,19 @@ func (wintun *Wintun) InterfaceName() (string, error) {
 
 // SetInterfaceName sets name of the Wintun interface.
 func (wintun *Wintun) SetInterfaceName(ifname string) error {
-	netRegKey, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.netRegKeyName(), registry.SET_VALUE)
-	if err != nil {
-		return fmt.Errorf("Network-specific registry key open failed: %v", err)
-	}
-	defer netRegKey.Close()
-	err = netRegKey.SetStringValue("Name", ifname)
-	if err != nil {
-		return err
-	}
-	deviceRegKey, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.deviceRegKeyName(), registry.SET_VALUE)
-	if err != nil {
-		return fmt.Errorf("Device-level registry key open failed: %v", err)
-	}
-	defer deviceRegKey.Close()
-	err = deviceRegKey.SetStringValue("DeviceDesc", deviceTypeName)
-	if err != nil {
-		return err
-	}
-	err = deviceRegKey.SetStringValue("FriendlyName", deviceTypeName)
-	if err != nil {
-		return err
-	}
 	// We have to tell the various runtime COM services about the new name too. We ignore the
 	// error because netshell isn't available on servercore.
 	// TODO: netsh.exe falls back to NciSetConnection in this case. If somebody complains, maybe
 	// we should do the same.
 	netshell.HrRenameConnection(&wintun.cfgInstanceID, windows.StringToUTF16Ptr(ifname))
-	return nil
+
+	// Set the interface name. The above line should have done this too, but in case it failed, we force it.
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.netRegKeyName(), registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("Network-specific registry key open failed: %v", err)
+	}
+	defer key.Close()
+	return key.SetStringValue("Name", ifname)
 }
 
 // netRegKeyName returns the interface-specific network registry key name.
@@ -601,11 +588,6 @@ func (wintun *Wintun) netRegKeyName() string {
 // tcpipAdapterRegKeyName returns the adapter-specific TCP/IP network registry key name.
 func (wintun *Wintun) tcpipAdapterRegKeyName() string {
 	return fmt.Sprintf("SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Adapters\\%v", wintun.cfgInstanceID)
-}
-
-// deviceRegKeyName returns the device-level registry key name
-func (wintun *Wintun) deviceRegKeyName() string {
-	return fmt.Sprintf("SYSTEM\\CurrentControlSet\\Enum\\%v", wintun.devInstanceID)
 }
 
 // tcpipInterfaceRegKeyName returns the interface-specific TCP/IP network registry key name.

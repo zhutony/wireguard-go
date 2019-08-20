@@ -332,6 +332,24 @@ func (deviceInfoSet DevInfo) SetDeviceRegistryPropertyString(deviceInfoData *Dev
 	return err
 }
 
+//sys	setupDiSetDeviceProperty(deviceInfoSet DevInfo, deviceInfoData *DevInfoData, propertyKey *DevPropKey, propertyType DevPropType, propertyBuffer *byte, propertyBufferSize uint32, flags uint32) (err error) = setupapi.SetupDiSetDevicePropertyW
+
+// SetupDiSetDeviceProperty function sets a Plug and Play device property for a device.
+func SetupDiSetDeviceProperty(deviceInfoSet DevInfo, deviceInfoData *DevInfoData, propertyKey *DevPropKey, propertyType DevPropType, propertyBuffers []byte) error {
+	return setupDiSetDeviceProperty(deviceInfoSet, deviceInfoData, propertyKey, propertyType, &propertyBuffers[0], uint32(len(propertyBuffers)), 0)
+}
+
+// SetDevicePropertyString method sets a Plug and Play device property string for a device.
+func (deviceInfoSet DevInfo) SetDevicePropertyString(deviceInfoData *DevInfoData, propertyKey *DevPropKey, str string) error {
+	str16, err := windows.UTF16FromString(str)
+	if err != nil {
+		return err
+	}
+	err = setupDiSetDeviceProperty(deviceInfoSet, deviceInfoData, propertyKey, DEVPROP_TYPE_STRING, (*byte)(unsafe.Pointer(&str16[0])), uint32(len(str16) * 2), 0)
+	runtime.KeepAlive(str16)
+	return err
+}
+
 //sys	setupDiGetDeviceInstallParams(deviceInfoSet DevInfo, deviceInfoData *DevInfoData, deviceInstallParams *DevInstallParams) (err error) = setupapi.SetupDiGetDeviceInstallParamsW
 
 // SetupDiGetDeviceInstallParams function retrieves device installation parameters for a device information set or a particular device information element.
