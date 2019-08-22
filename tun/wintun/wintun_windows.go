@@ -535,6 +535,19 @@ func (wintun *Wintun) SetInterfaceName(ifname string) error {
 		availableIfname = fmt.Sprintf("%s %d", ifname, i+1)
 	}
 
+	if availableIfname != ifname {
+		// TODO: This is a pretty bad workaround, and we really should start interacting directly with NetSetup2
+		netRegKey, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.netRegKeyName(), registry.SET_VALUE)
+		if err != nil {
+			return fmt.Errorf("Network-specific registry key open failed: %v", err)
+		}
+		defer netRegKey.Close()
+		err = netRegKey.SetStringValue("Name", ifname)
+		if err != nil {
+			return fmt.Errorf("SetStringValue(NetRegKey, Name) failed: %v", err)
+		}
+	}
+
 	// TODO: This should use NetSetup2 so that it doesn't get unset.
 	deviceRegKey, err := registry.OpenKey(registry.LOCAL_MACHINE, wintun.deviceRegKeyName(), registry.SET_VALUE)
 	if err != nil {
@@ -556,6 +569,11 @@ func (wintun *Wintun) tcpipAdapterRegKeyName() string {
 // deviceRegKeyName returns the device-level registry key name
 func (wintun *Wintun) deviceRegKeyName() string {
 	return fmt.Sprintf("SYSTEM\\CurrentControlSet\\Enum\\%v", wintun.devInstanceID)
+}
+
+// netRegKeyName returns the interface-specific network registry key name.
+func (wintun *Wintun) netRegKeyName() string {
+	return fmt.Sprintf("SYSTEM\\CurrentControlSet\\Control\\Network\\%v\\%v\\Connection", deviceClassNetGUID, wintun.cfgInstanceID)
 }
 
 // tcpipInterfaceRegKeyName returns the interface-specific TCP/IP network registry key name.
