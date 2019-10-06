@@ -94,11 +94,18 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID) (Dev
 		return nil, fmt.Errorf("Error creating events: %v", err)
 	}
 
-	tun.handle, err = tun.wt.Register(&tun.rings)
+	var errChan <-chan error
+	tun.handle, err, errChan = tun.wt.Register(&tun.rings)
 	if err != nil {
 		tun.Close()
 		return nil, fmt.Errorf("Error registering rings: %v", err)
 	}
+	go func() {
+		err := <-errChan
+		if err != nil {
+			tun.errors <- err
+		}
+	}()
 	return tun, nil
 }
 
@@ -120,6 +127,7 @@ func (tun *NativeTun) Close() error {
 		windows.SetEvent(tun.rings.Send.TailMoved) // wake the reader if it's sleeping
 	}
 	if tun.handle != windows.InvalidHandle {
+		windows.CancelIo(tun.handle)
 		windows.CloseHandle(tun.handle)
 	}
 	tun.rings.Close()

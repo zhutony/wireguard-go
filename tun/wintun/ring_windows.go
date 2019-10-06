@@ -83,15 +83,17 @@ func (descriptor *RingDescriptor) Close() {
 	}
 }
 
-func (wintun *Interface) Register(descriptor *RingDescriptor) (windows.Handle, error) {
+func (wintun *Interface) Register(descriptor *RingDescriptor) (windows.Handle, error, <-chan error) {
 	handle, err := wintun.handle()
 	if err != nil {
-		return 0, err
+		windows.CloseHandle(handle)
+		return 0, err, nil
 	}
-	var bytesReturned uint32
-	err = windows.DeviceIoControl(handle, ioctlRegisterRings, (*byte)(unsafe.Pointer(descriptor)), uint32(unsafe.Sizeof(*descriptor)), nil, 0, &bytesReturned, nil)
-	if err != nil {
-		return 0, err
-	}
-	return handle, nil
+	c := make(chan error, 1)
+	go func() {
+		var bytesReturned uint32
+		c <- windows.DeviceIoControl(handle, ioctlRegisterRings, (*byte)(unsafe.Pointer(descriptor)), uint32(unsafe.Sizeof(*descriptor)), nil, 0, &bytesReturned, nil)
+		windows.CloseHandle(handle)
+	}()
+	return handle, nil, c
 }
