@@ -509,10 +509,9 @@ func (wintun *Interface) EnableInterface(enable bool) (bool, error) {
 	return checkReboot(devInfo, devInfoData), nil
 }
 
-// DeleteMatchingInterfaces deletes all Wintun interfaces, which match
-// given criteria, and returns which ones it deleted, whether a reboot
-// is required after, and which errors occurred during the process.
-func (pool Pool) DeleteMatchingInterfaces(matches func(wintun *Interface) bool) (deviceInstancesDeleted []uint32, rebootRequired bool, errors []error) {
+// processMatchingInterfaces processes all Wintun interfaces, and returns which ones it processed,
+// whether a reboot is required after, and which errors occurred during the process.
+func (pool Pool) processMatchingInterfaces(process func(deviceInfoSet setupapi.DevInfo, deviceInfoData *setupapi.DevInfoData) (processed bool, err error)) (deviceInstancesProcessed []uint32, rebootRequired bool, errors []error) {
 	mutex, err := pool.takeNameMutex()
 	if err != nil {
 		errors = append(errors, err)
@@ -584,40 +583,54 @@ func (pool Pool) DeleteMatchingInterfaces(matches func(wintun *Interface) bool) 
 			continue
 		}
 
-		wintun, err := makeWintun(devInfo, devInfoData, pool)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("Unable to make Wintun interface object: %v", err))
-			continue
-		}
-		if !matches(wintun) {
-			continue
-		}
-
-		err = setQuietInstall(devInfo, devInfoData)
+		inst := devInfoData.DevInst
+		processed, err := process(devInfo, devInfoData)
 		if err != nil {
 			errors = append(errors, err)
 			continue
 		}
+		if !processed {
+			continue
+		}
+		rebootRequired = rebootRequired || checkReboot(devInfo, devInfoData)
+		deviceInstancesProcessed = append(deviceInstancesProcessed, inst)
+	}
+	return
+}
 
-		inst := devInfoData.DevInst
+// DeleteMatchingInterfaces deletes all Wintun interfaces, which match
+// given criteria, and returns which ones it deleted, whether a reboot
+// is required after, and which errors occurred during the process.
+func (pool Pool) DeleteMatchingInterfaces(matches func(wintun *Interface) bool) (deviceInstancesDeleted []uint32, rebootRequired bool, errors []error) {
+	return pool.processMatchingInterfaces(func(devInfo setupapi.DevInfo, devInfoData *setupapi.DevInfoData) (processed bool, err error) {
+		wintun, err := makeWintun(devInfo, devInfoData, pool)
+		if err != nil {
+			return false, fmt.Errorf("Unable to make Wintun interface object: %v", err)
+		}
+		if !matches(wintun) {
+			return false, nil
+		}
+
+		err = setQuietInstall(devInfo, devInfoData)
+		if err != nil {
+			return false, err
+		}
+
 		removeDeviceParams := setupapi.RemoveDeviceParams{
 			ClassInstallHeader: *setupapi.MakeClassInstallHeader(setupapi.DIF_REMOVE),
 			Scope:              setupapi.DI_REMOVEDEVICE_GLOBAL,
 		}
 		err = devInfo.SetClassInstallParams(devInfoData, &removeDeviceParams.ClassInstallHeader, uint32(unsafe.Sizeof(removeDeviceParams)))
 		if err != nil {
-			errors = append(errors, err)
-			continue
+			return false, err
 		}
 		err = devInfo.CallClassInstaller(setupapi.DIF_REMOVE, devInfoData)
 		if err != nil {
-			errors = append(errors, err)
-			continue
+			return false, err
 		}
-		rebootRequired = rebootRequired || checkReboot(devInfo, devInfoData)
-		deviceInstancesDeleted = append(deviceInstancesDeleted, inst)
-	}
-	return
+
+		return true, nil
+	})
 }
 
 // isMember checks if SPDRP_DEVICEDESC or SPDRP_FRIENDLYNAME match device type name.
