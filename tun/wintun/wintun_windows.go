@@ -633,6 +633,61 @@ func (pool Pool) DeleteMatchingInterfaces(matches func(wintun *Interface) bool) 
 	})
 }
 
+// EnableMatchingInterfacesAction defines what action EnableMatchingInterfaces should take on a
+// given interface.
+type EnableMatchingInterfacesAction int
+
+const (
+	SkipInterface EnableMatchingInterfacesAction = iota
+	EnableInterface
+	DisableInterface
+)
+
+// EnableMatchingInterfaces enables or disables all Wintun interfaces, which match given criteria,
+// and returns which ones it processed, whether a reboot is required after, and which errors
+// occurred during the process.
+func (pool Pool) EnableMatchingInterfaces(enable func(wintun *Interface) EnableMatchingInterfacesAction) (deviceInstancesEnabled []uint32, rebootRequired bool, errors []error) {
+	return pool.processMatchingInterfaces(func(devInfoList setupapi.DevInfo, deviceData *setupapi.DevInfoData) (processed bool, err error) {
+		wintun, err := makeWintun(devInfoList, deviceData, pool)
+		if err != nil {
+			return false, fmt.Errorf("Unable to make Wintun interface object: %v", err)
+		}
+		action := enable(wintun)
+		if action == SkipInterface {
+			return false, nil
+		}
+
+		err = setQuietInstall(devInfoList, deviceData)
+		if err != nil {
+			return false, err
+		}
+
+		propchangeDeviceParams := setupapi.PropChangeParams{
+			ClassInstallHeader: *setupapi.MakeClassInstallHeader(setupapi.DIF_PROPERTYCHANGE),
+			Scope:              setupapi.DICS_FLAG_GLOBAL,
+		}
+		if action == EnableInterface {
+			propchangeDeviceParams.StateChange = setupapi.DICS_ENABLE
+		} else if action == DisableInterface {
+			propchangeDeviceParams.StateChange = setupapi.DICS_DISABLE
+		} else {
+			return false, fmt.Errorf("Invalid action returned: %v", action)
+		}
+
+		err = devInfoList.SetClassInstallParams(deviceData, &propchangeDeviceParams.ClassInstallHeader, uint32(unsafe.Sizeof(propchangeDeviceParams)))
+		if err != nil {
+			return false, fmt.Errorf("SetupDiSetClassInstallParams failed: %v", err)
+		}
+
+		err = devInfoList.CallClassInstaller(setupapi.DIF_PROPERTYCHANGE, deviceData)
+		if err != nil {
+			return false, fmt.Errorf("SetupDiCallClassInstaller failed: %v", err)
+		}
+
+		return true, nil
+	})
+}
+
 // isMember checks if SPDRP_DEVICEDESC or SPDRP_FRIENDLYNAME match device type name.
 func (pool Pool) isMember(devInfo setupapi.DevInfo, devInfoData *setupapi.DevInfoData) (bool, error) {
 	deviceDescVal, err := devInfo.DeviceRegistryProperty(devInfoData, setupapi.SPDRP_DEVICEDESC)
