@@ -352,6 +352,11 @@ func (pool Pool) CreateInterface(ifname string, requestedGUID *windows.GUID) (wi
 			return
 		}
 	}
+	err = netDevRegKey.SetStringValue("WintunPool", deviceTypeName)
+	if err != nil {
+		err = fmt.Errorf("SetStringValue(WintunPool) failed: %v", err)
+		return
+	}
 
 	// Install interfaces if any. (Ignore errors)
 	devInfo.CallClassInstaller(setupapi.DIF_INSTALLINTERFACES, devInfoData)
@@ -688,21 +693,31 @@ func (pool Pool) EnableMatchingInterfaces(enable func(wintun *Interface) EnableM
 	})
 }
 
-// isMember checks if SPDRP_DEVICEDESC or SPDRP_FRIENDLYNAME match device type name.
+// isMember checks if device is member of the pool. If device is not tagged yet, it tags it as a
+// member of the pool.
 func (pool Pool) isMember(devInfo setupapi.DevInfo, devInfoData *setupapi.DevInfoData) (bool, error) {
-	deviceDescVal, err := devInfo.DeviceRegistryProperty(devInfoData, setupapi.SPDRP_DEVICEDESC)
+	// TODO: After this version is deployed and all adapters are properly adopted,
+	// Remove adoption from this function. Do not forget to tighten access (i.e. remove registry.SET_VALUE).
+	netDevRegKey, err := devInfo.OpenDevRegKey(devInfoData, setupapi.DICS_FLAG_GLOBAL, 0, setupapi.DIREG_DRV, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
-		return false, fmt.Errorf("DeviceRegistryPropertyString(SPDRP_DEVICEDESC) failed: %v", err)
+		return false, fmt.Errorf("Device-specific registry key open failed: %v", err)
 	}
-	deviceDesc, _ := deviceDescVal.(string)
-	friendlyNameVal, err := devInfo.DeviceRegistryProperty(devInfoData, setupapi.SPDRP_FRIENDLYNAME)
-	if err != nil {
-		return false, fmt.Errorf("DeviceRegistryPropertyString(SPDRP_FRIENDLYNAME) failed: %v", err)
-	}
-	friendlyName, _ := friendlyNameVal.(string)
+	defer netDevRegKey.Close()
+
 	deviceTypeName := pool.deviceTypeName()
-	return friendlyName == deviceTypeName || deviceDesc == deviceTypeName ||
-		removeNumberedSuffix(friendlyName) == deviceTypeName || removeNumberedSuffix(deviceDesc) == deviceTypeName, nil
+	valueStr, err := registryEx.GetStringValue(netDevRegKey, "WintunPool")
+	if err == windows.ERROR_FILE_NOT_FOUND { // This adapter is not tagged yet.
+		err = netDevRegKey.SetStringValue("WintunPool", deviceTypeName)
+		if err != nil {
+			return false, fmt.Errorf("SetStringValue(WintunPool) failed: %v", err)
+		}
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("GetStringValue(WintunPool) failed: %v", err)
+	}
+
+	return strings.ToLower(valueStr) == strings.ToLower(pool.deviceTypeName()), nil
 }
 
 // checkReboot checks device install parameters if a system reboot is required.
