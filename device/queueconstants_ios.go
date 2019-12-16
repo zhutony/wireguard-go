@@ -15,4 +15,6 @@ const (
 	QueueHandshakeSize         = 1024
 	MaxSegmentSize             = 1700
 	PreallocatedBuffersPerPool = 1024
+	MultithreadedSending       = true
+	MultithreadedReceiving     = true
 )

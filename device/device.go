@@ -15,11 +15,6 @@ import (
 	"golang.zx2c4.com/wireguard/tun"
 )
 
-const (
-	DeviceRoutineNumberPerCPU     = 3
-	DeviceRoutineNumberAdditional = 2
-)
-
 type Device struct {
 	isUp     AtomicBool // device is (going) up
 	isClosed AtomicBool // device is closed? (acting as guard)
@@ -311,11 +306,24 @@ func NewDevice(tunDevice tun.Device, logger *Logger) *Device {
 	cpus := runtime.NumCPU()
 	device.state.starting.Wait()
 	device.state.stopping.Wait()
-	device.state.stopping.Add(DeviceRoutineNumberPerCPU*cpus + DeviceRoutineNumberAdditional)
-	device.state.starting.Add(DeviceRoutineNumberPerCPU*cpus + DeviceRoutineNumberAdditional)
+
+	device.state.stopping.Add(cpus + 2)
+	device.state.starting.Add(cpus + 2)
+	if MultithreadedReceiving {
+		device.state.stopping.Add(cpus)
+		device.state.starting.Add(cpus)
+	}
+	if MultithreadedSending {
+		device.state.stopping.Add(cpus)
+		device.state.starting.Add(cpus)
+	}
 	for i := 0; i < cpus; i += 1 {
-		go device.RoutineEncryption()
-		go device.RoutineDecryption()
+		if MultithreadedSending {
+			go device.RoutineEncryption()
+		}
+		if MultithreadedReceiving {
+			go device.RoutineDecryption()
+		}
 		go device.RoutineHandshake()
 	}
 

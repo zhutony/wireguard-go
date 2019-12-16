@@ -310,12 +310,38 @@ func (device *Device) RoutineReadFromTUN() {
 
 		// insert into nonce/pre-handshake queue
 
-		if peer.isRunning.Get() {
+		if !peer.isRunning.Get() {
+			continue
+		}
+		if MultithreadedSending {
 			if peer.queue.packetInNonceQueueIsAwaitingKey.Get() {
 				peer.SendHandshakeInitiation(false)
 			}
 			addToNonceQueue(peer.queue.nonce, elem, device)
 			elem = nil
+		} else {
+			// This logic here should copy RoutineNonce more or less.
+			keypair := peer.keypairs.Current()
+			if keypair == nil || !(keypair.sendNonce < RejectAfterMessages && time.Since(keypair.created) < RejectAfterTime) {
+				if peer.queue.packetInNonceQueueIsAwaitingKey.Get() {
+					peer.SendHandshakeInitiation(false)
+				}
+				addToNonceQueue(peer.queue.nonce, elem, device)
+				elem = nil
+				continue
+			}
+
+			// populate work element
+			elem.peer = peer
+			elem.nonce = atomic.AddUint64(&keypair.sendNonce, 1) - 1
+			// double check in case of race condition added by future code
+			if elem.nonce >= RejectAfterMessages {
+				atomic.StoreUint64(&keypair.sendNonce, RejectAfterMessages)
+				continue
+			}
+			elem.keypair = keypair
+			device.encryptPacket(elem)
+			peer.sendEncryptedPacket(elem)
 		}
 	}
 }
@@ -386,10 +412,8 @@ func (peer *Peer) RoutineNonce() {
 				// check validity of newest key pair
 
 				keypair = peer.keypairs.Current()
-				if keypair != nil && keypair.sendNonce < RejectAfterMessages {
-					if time.Since(keypair.created) < RejectAfterTime {
-						break
-					}
+				if keypair != nil && keypair.sendNonce < RejectAfterMessages && time.Since(keypair.created) < RejectAfterTime {
+					break
 				}
 				peer.queue.packetInNonceQueueIsAwaitingKey.Set(true)
 
@@ -439,13 +463,53 @@ func (peer *Peer) RoutineNonce() {
 			}
 
 			elem.keypair = keypair
-			elem.dropped = AtomicFalse
-			elem.Lock()
 
-			// add to parallel and sequential queue
-			addToOutboundAndEncryptionQueues(peer.queue.outbound, device.queue.encryption, elem)
+			if MultithreadedSending {
+				elem.dropped = AtomicFalse
+				elem.Lock()
+				// add to parallel and sequential queue
+				addToOutboundAndEncryptionQueues(peer.queue.outbound, device.queue.encryption, elem)
+			} else {
+				device.encryptPacket(elem)
+				peer.sendEncryptedPacket(elem)
+			}
 		}
 	}
+}
+
+func (device *Device) encryptPacket(elem *QueueOutboundElement) {
+	var nonce [chacha20poly1305.NonceSize]byte
+
+	header := elem.buffer[:MessageTransportHeaderSize]
+
+	fieldType := header[0:4]
+	fieldReceiver := header[4:8]
+	fieldNonce := header[8:16]
+
+	binary.LittleEndian.PutUint32(fieldType, MessageTransportType)
+	binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
+	binary.LittleEndian.PutUint64(fieldNonce, elem.nonce)
+
+	// pad content to multiple of 16
+	mtu := int(atomic.LoadInt32(&device.tun.mtu))
+	lastUnit := len(elem.packet) % mtu
+	paddedSize := (lastUnit + PaddingMultiple - 1) & ^(PaddingMultiple - 1)
+	if paddedSize > mtu {
+		paddedSize = mtu
+	}
+	for i := len(elem.packet); i < paddedSize; i++ {
+		elem.packet = append(elem.packet, 0)
+	}
+
+	// encrypt content and release to consumer
+
+	binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
+	elem.packet = elem.keypair.send.Seal(
+		header,
+		nonce[:],
+		elem.packet,
+		nil,
+	)
 }
 
 /* Encrypts the elements in the queue
@@ -454,9 +518,6 @@ func (peer *Peer) RoutineNonce() {
  * Obs. One instance per core
  */
 func (device *Device) RoutineEncryption() {
-
-	var nonce [chacha20poly1305.NonceSize]byte
-
 	logDebug := device.log.Debug
 
 	defer func() {
@@ -500,42 +561,25 @@ func (device *Device) RoutineEncryption() {
 				continue
 			}
 
-			// populate header fields
-
-			header := elem.buffer[:MessageTransportHeaderSize]
-
-			fieldType := header[0:4]
-			fieldReceiver := header[4:8]
-			fieldNonce := header[8:16]
-
-			binary.LittleEndian.PutUint32(fieldType, MessageTransportType)
-			binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
-			binary.LittleEndian.PutUint64(fieldNonce, elem.nonce)
-
-			// pad content to multiple of 16
-
-			mtu := int(atomic.LoadInt32(&device.tun.mtu))
-			lastUnit := len(elem.packet) % mtu
-			paddedSize := (lastUnit + PaddingMultiple - 1) & ^(PaddingMultiple - 1)
-			if paddedSize > mtu {
-				paddedSize = mtu
-			}
-			for i := len(elem.packet); i < paddedSize; i++ {
-				elem.packet = append(elem.packet, 0)
-			}
-
-			// encrypt content and release to consumer
-
-			binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
-			elem.packet = elem.keypair.send.Seal(
-				header,
-				nonce[:],
-				elem.packet,
-				nil,
-			)
+			device.encryptPacket(elem)
 			elem.Unlock()
 		}
 	}
+}
+
+func (peer *Peer) sendEncryptedPacket(elem *QueueOutboundElement) bool {
+	peer.timersAnyAuthenticatedPacketTraversal()
+	peer.timersAnyAuthenticatedPacketSent()
+	err := peer.SendBuffer(elem.packet)
+	if len(elem.packet) != MessageKeepaliveSize {
+		peer.timersDataSent()
+	}
+	if err != nil {
+		peer.device.log.Error.Println(peer, "- Failed to send data packet", err)
+		return false
+	}
+	peer.keepKeyFreshSending()
+	return true
 }
 
 /* Sequentially reads packets from queue and sends to endpoint
@@ -544,11 +588,8 @@ func (device *Device) RoutineEncryption() {
  * The routine terminates then the outbound queue is closed.
  */
 func (peer *Peer) RoutineSequentialSender() {
-
 	device := peer.device
-
 	logDebug := device.log.Debug
-	logError := device.log.Error
 
 	defer func() {
 		for {
@@ -591,24 +632,9 @@ func (peer *Peer) RoutineSequentialSender() {
 				device.PutOutboundElement(elem)
 				continue
 			}
-
-			peer.timersAnyAuthenticatedPacketTraversal()
-			peer.timersAnyAuthenticatedPacketSent()
-
-			// send message and return buffer to pool
-
-			err := peer.SendBuffer(elem.packet)
-			if len(elem.packet) != MessageKeepaliveSize {
-				peer.timersDataSent()
-			}
+			peer.sendEncryptedPacket(elem)
 			device.PutMessageBuffer(elem.buffer)
 			device.PutOutboundElement(elem)
-			if err != nil {
-				logError.Println(peer, "- Failed to send data packet", err)
-				continue
-			}
-
-			peer.keepKeyFreshSending()
 		}
 	}
 }

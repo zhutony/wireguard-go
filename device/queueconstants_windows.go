@@ -1,5 +1,3 @@
-// +build !android,!ios,!windows
-
 /* SPDX-License-Identifier: MIT
  *
  * Copyright (C) 2017-2019 WireGuard LLC. All Rights Reserved.
@@ -13,6 +11,6 @@ const (
 	QueueHandshakeSize         = 1024
 	MaxSegmentSize             = (1 << 16) - 1 // largest possible UDP datagram
 	PreallocatedBuffersPerPool = 0             // Disable and allow for infinite memory growth
-	MultithreadedSending       = true
-	MultithreadedReceiving     = true
+	MultithreadedSending       = false         // Latency is a problem, so we speed up TCP acks
+	MultithreadedReceiving     = false
 )

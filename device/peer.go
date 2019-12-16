@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-const (
-	PeerRoutineNumber = 3
-)
-
 type Peer struct {
 	isRunning                   AtomicBool
 	sync.RWMutex                // Mostly protects endpoint, but is generally taken whenever we modify peer
@@ -189,8 +185,16 @@ func (peer *Peer) Start() {
 	peer.routines.starting.Wait()
 	peer.routines.stopping.Wait()
 	peer.routines.stop = make(chan struct{})
-	peer.routines.starting.Add(PeerRoutineNumber)
-	peer.routines.stopping.Add(PeerRoutineNumber)
+	peer.routines.starting.Add(1)
+	peer.routines.stopping.Add(1)
+	if MultithreadedSending {
+		peer.routines.starting.Add(1)
+		peer.routines.stopping.Add(1)
+	}
+	if MultithreadedReceiving {
+		peer.routines.starting.Add(1)
+		peer.routines.stopping.Add(1)
+	}
 
 	// prepare queues
 
@@ -206,8 +210,12 @@ func (peer *Peer) Start() {
 	// wait for routines to start
 
 	go peer.RoutineNonce()
-	go peer.RoutineSequentialSender()
-	go peer.RoutineSequentialReceiver()
+	if MultithreadedSending {
+		go peer.RoutineSequentialSender()
+	}
+	if MultithreadedReceiving {
+		go peer.RoutineSequentialReceiver()
+	}
 
 	peer.routines.starting.Wait()
 	peer.isRunning.Set(true)
