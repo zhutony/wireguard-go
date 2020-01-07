@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -31,6 +32,16 @@ type rateJuggler struct {
 	changing      int32
 }
 
+type pendingPacket struct {
+	offset    uint32
+	completed bool
+	next      *pendingPacket
+}
+
+type pendingPacketQueue struct {
+	head, tail *pendingPacket
+}
+
 type NativeTun struct {
 	wt        *wintun.Interface
 	handle    windows.Handle
@@ -40,6 +51,9 @@ type NativeTun struct {
 	forcedMTU int
 	rate      rateJuggler
 	rings     *wintun.RingDescriptor
+	rcvLock   sync.Mutex
+	rcvTail   uint32
+	rcvQueue  pendingPacketQueue
 }
 
 const WintunPool = wintun.Pool("WireGuard")
@@ -224,23 +238,34 @@ func (tun *NativeTun) Write(buff []byte, offset int) (int, error) {
 		return 0, os.ErrClosed
 	}
 
-	buffTail := atomic.LoadUint32(&tun.rings.Receive.Ring.Tail)
-	if buffTail >= wintun.PacketCapacity {
-		return 0, os.ErrClosed
-	}
-
+	p := &pendingPacket{}
+	tun.rcvLock.Lock()
+	buffTail := tun.rcvTail
 	buffSpace := tun.rings.Receive.Ring.Wrap(buffHead - buffTail - wintun.PacketAlignment)
 	if alignedPacketSize > buffSpace {
+		tun.rcvLock.Unlock()
 		return 0, nil // Dropping when ring is full.
 	}
+	tun.rcvTail = tun.rings.Receive.Ring.Wrap(buffTail + alignedPacketSize)
+	p.offset = tun.rcvTail
+	tun.rcvQueue.append(p)
+	tun.rcvLock.Unlock()
 
 	packet := (*wintun.Packet)(unsafe.Pointer(&tun.rings.Receive.Ring.Data[buffTail]))
 	packet.Size = packetSize
 	copy(packet.Data[:packetSize], buff[offset:])
-	atomic.StoreUint32(&tun.rings.Receive.Ring.Tail, tun.rings.Receive.Ring.Wrap(buffTail+alignedPacketSize))
-	if atomic.LoadInt32(&tun.rings.Receive.Ring.Alertable) != 0 {
-		windows.SetEvent(tun.rings.Receive.TailMoved)
+	p.completed = true
+
+	tun.rcvLock.Lock()
+	for tun.rcvQueue.head != nil && tun.rcvQueue.head.completed {
+		pCompleted := tun.rcvQueue.head
+		tun.rcvQueue.head = pCompleted.next
+		atomic.StoreUint32(&tun.rings.Receive.Ring.Tail, pCompleted.offset)
+		if atomic.LoadInt32(&tun.rings.Receive.Ring.Alertable) != 0 {
+			windows.SetEvent(tun.rings.Receive.TailMoved)
+		}
 	}
+	tun.rcvLock.Unlock()
 	return int(packetSize), nil
 }
 
@@ -267,4 +292,13 @@ func (rate *rateJuggler) update(packetLen uint64) {
 		atomic.StoreUint64(&rate.nextByteCount, 0)
 		atomic.StoreInt32(&rate.changing, 0)
 	}
+}
+
+func (q *pendingPacketQueue) append(p *pendingPacket) {
+	if q.head == nil {
+		q.head = p
+	} else {
+		q.tail.next = p
+	}
+	q.tail = p
 }
